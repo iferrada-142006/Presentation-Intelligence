@@ -1,0 +1,43 @@
+# Environment
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.next/
+.turbo/
+
+# ML Models (large files - download separately)
+backend/app/models/*.pt
+backend/app/models/*.bin
+backend/app/models/*.gguf
+
+# Uploads (user data - never commit)
+backend/uploads/
+uploads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

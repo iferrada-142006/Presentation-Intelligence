@@ -1,0 +1,53 @@
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pi-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8100:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+      - pi_uploads:/app/uploads
+      - pi_models:/app/models
+    depends_on:
+      - redis
+    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pi-worker
+    restart: unless-stopped
+    command: python -m app.worker.main
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+      - pi_uploads:/app/uploads
+      - pi_models:/app/models
+    depends_on:
+      - redis
+    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  redis:
+    image: redis:7-alpine
+    container_name: pi-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - pi_redis:/data
+
+volumes:
+  pi_uploads:
+  pi_models:
+  pi_redis:
