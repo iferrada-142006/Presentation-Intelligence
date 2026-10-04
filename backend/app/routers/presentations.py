@@ -1,0 +1,93 @@
+import os
+import uuid
+import aiofiles
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.models import Presentation, VideoFile, ProcessingJob
+from app.schemas.presentation import PresentationCreate, PresentationStatus
+from app.config import settings
+
+router = APIRouter(prefix="/api/presentations", tags=["presentations"])
+
+ALLOWED_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi", ".mkv"}
+MAX_SIZE_BYTES = settings.max_video_size_mb * 1024 * 1024
+
+
+@router.post("/", response_model=PresentationCreate, status_code=201)
+async def upload_presentation(
+    file: UploadFile = File(...),
+    title: str = Form(default=""),
+    language: str = Form(default="es"),
+    db: Session = Depends(get_db),
+):
+    # Validate extension
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato no soportado: {ext}. Usa: {', '.join(ALLOWED_EXTENSIONS)}",
+        )
+
+    # Save file to disk
+    stored_filename = f"{uuid.uuid4()}{ext}"
+    file_path = os.path.join(settings.upload_dir, stored_filename)
+
+    size_bytes = 0
+    async with aiofiles.open(file_path, "wb") as f:
+        while chunk := await file.read(1024 * 1024):  # 1 MB chunks
+            size_bytes += len(chunk)
+            if size_bytes > MAX_SIZE_BYTES:
+                await f.close()
+                os.unlink(file_path)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"El archivo supera el límite de {settings.max_video_size_mb} MB",
+                )
+            await f.write(chunk)
+
+    presentation_title = title.strip() or (file.filename or "Sin título")
+
+    # Create DB records
+    presentation = Presentation(title=presentation_title, language=language)
+    db.add(presentation)
+    db.flush()
+
+    video_file = VideoFile(
+        presentation_id=presentation.id,
+        original_filename=file.filename or stored_filename,
+        stored_filename=stored_filename,
+        file_path=file_path,
+        size_bytes=size_bytes,
+        format=ext.lstrip("."),
+    )
+    db.add(video_file)
+
+    job = ProcessingJob(presentation_id=presentation.id, status="queued")
+    db.add(job)
+    db.commit()
+    db.refresh(presentation)
+    db.refresh(job)
+
+    return PresentationCreate(
+        id=presentation.id,
+        title=presentation.title,
+        status=presentation.status,
+        uploaded_at=presentation.uploaded_at,
+        job_id=job.id,
+    )
+
+
+@router.get("/{presentation_id}/status", response_model=PresentationStatus)
+def get_status(presentation_id: int, db: Session = Depends(get_db)):
+    presentation = db.query(Presentation).filter(
+        Presentation.id == presentation_id
+    ).first()
+    if not presentation:
+        raise HTTPException(status_code=404, detail="Presentación no encontrada")
+    return presentation
+
+
+@router.get("/", response_model=list[PresentationStatus])
+def list_presentations(db: Session = Depends(get_db)):
+    return db.query(Presentation).order_by(Presentation.uploaded_at.desc()).all()
