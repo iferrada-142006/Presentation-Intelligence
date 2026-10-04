@@ -66,20 +66,32 @@ BODY / HEAD (from video — confidence 0.75–0.9):
 - Head pitch mean ± std: {round(float(m.get('head_pitch_mean', 0)), 1)}° ± {round(float(m.get('head_pitch_std', 0)), 1)}°  [+ = tilted down]
 - Body movement mean: {round(float(m.get('body_movement_mean', 0)) * 100, 2)} (normalized ×100)"""
 
+    # Timeline events block — only present for Phase 6+ jobs
+    events = data.get("timeline_events", [])
+    events_block = ""
+    if events:
+        lines = []
+        for e in events[:20]:  # cap at 20 to stay within token budget
+            ts = e.get("start_seconds", 0)
+            m_val = int(ts) // 60
+            s_val = int(ts) % 60
+            lines.append(f"  [{m_val}:{s_val:02d}] {e.get('description', e.get('event_type'))}")
+        events_block = "\n\nTIMELINE EVENTS (specific moments — use these to cite timestamps):\n" + "\n".join(lines)
+
     return f"""You are an evidence-based communication coach analyzing a {lang_label} presentation.
 
 MEASURED DATA (objective):
-{metrics_block}
+{metrics_block}{events_block}
 
 TRANSCRIPT:
 {transcript}
 
 INSTRUCTIONS:
 1. Generate feedback {response_lang} based ONLY on the data above.
-2. For each item, cite the specific metric or transcript quote that supports it.
+2. For each item, cite the specific metric, timestamp, or transcript quote that supports it.
 3. Distinguish what was MEASURED from what you INFER. Use phrases like "the data shows", "this suggests", "one possible interpretation".
 4. Do NOT use psychological labels: avoid words like "nervous", "insecure", "confident", "passionate".
-5. Be specific and constructive. Avoid vague statements like "good job" or "needs improvement".
+5. Be specific and constructive. Reference timestamps (e.g., "at 1:23") when timeline events support the point.
 6. Generate exactly 2–3 strengths, 2–3 improvements, and 2 exercises.
 
 Return ONLY a valid JSON object with this exact structure (no markdown, no explanation):

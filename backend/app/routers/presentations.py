@@ -5,9 +5,9 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
 from sqlalchemy.orm import joinedload
-from app.models import Presentation, VideoFile, ProcessingJob, TranscriptSegment, PresentationMetric, FeedbackItem
+from app.models import Presentation, VideoFile, ProcessingJob, TranscriptSegment, PresentationMetric, TimelineEvent, FeedbackItem
 from app.schemas.presentation import PresentationCreate, PresentationStatus
-from app.schemas.report import ReportOut, MetricsOut, TranscriptSegmentOut, FeedbackItemOut
+from app.schemas.report import ReportOut, MetricsOut, TranscriptSegmentOut, TimelineEventOut, FeedbackItemOut
 from app.config import settings
 
 router = APIRouter(prefix="/api/presentations", tags=["presentations"])
@@ -124,6 +124,12 @@ def get_report(presentation_id: int, db: Session = Depends(get_db)):
     ).order_by(TranscriptSegment.start_seconds).all()
     transcript = [TranscriptSegmentOut.model_validate(s) for s in segments]
 
+    # Timeline events ordered by start time
+    event_rows = db.query(TimelineEvent).filter(
+        TimelineEvent.presentation_id == presentation_id
+    ).order_by(TimelineEvent.start_seconds).all()
+    timeline = [TimelineEventOut.model_validate(e) for e in event_rows]
+
     # Feedback items
     feedback_rows = db.query(FeedbackItem).filter(
         FeedbackItem.presentation_id == presentation_id
@@ -140,5 +146,6 @@ def get_report(presentation_id: int, db: Session = Depends(get_db)):
         processed_at=presentation.processed_at,
         metrics=metrics,
         transcript=transcript,
+        timeline=timeline,
         feedback=feedback,
     )

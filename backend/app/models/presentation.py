@@ -22,6 +22,7 @@ class Presentation(Base):
     metrics = relationship("PresentationMetric", back_populates="presentation")
     audio_features = relationship("AudioFeature", back_populates="presentation")
     video_features = relationship("VideoFeature", back_populates="presentation")
+    timeline_events = relationship("TimelineEvent", back_populates="presentation")
     feedback_items = relationship("FeedbackItem", back_populates="presentation")
 
 
@@ -128,6 +129,23 @@ class VideoFeature(Base):
     body_movement = Column(Float, nullable=True)
 
     presentation = relationship("Presentation", back_populates="video_features")
+
+
+class TimelineEvent(Base):
+    __tablename__ = "timeline_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    presentation_id = Column(Integer, ForeignKey("presentations.id"), nullable=False)
+    layer = Column(String(20), nullable=False)   # audio | speech | vision
+    event_type = Column(String(50), nullable=False)
+    # pause | wpm_sprint | filler_cluster | head_away | face_absent | movement_spike
+    start_seconds = Column(Float, nullable=False)
+    end_seconds = Column(Float, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+    magnitude = Column(Float, nullable=True)     # severity value (wpm, seconds, count…)
+    description = Column(Text, nullable=True)    # human-readable for LLM and UI
+
+    presentation = relationship("Presentation", back_populates="timeline_events")
 
 
 class FeedbackItem(Base):

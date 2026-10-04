@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getReport, Report } from '../lib/api'
+import { getReport, Report, TimelineEvent } from '../lib/api'
 
 function fmt(v: number | null, decimals = 1): string {
   if (v === null || v === undefined) return '—'
@@ -52,6 +52,40 @@ function FeedbackSection({ items, category, title, color }: {
   )
 }
 
+const LAYER_COLORS: Record<string, string> = {
+  audio:  'bg-blue-900 text-blue-300',
+  speech: 'bg-purple-900 text-purple-300',
+  vision: 'bg-teal-900 text-teal-300',
+}
+
+const EVENT_ICONS: Record<string, string> = {
+  pause:           '⏸',
+  wpm_sprint:      '⚡',
+  filler_cluster:  '💬',
+  head_away:       '↩️',
+  face_absent:     '👻',
+  movement_spike:  '🌊',
+}
+
+function tc(s: number): string {
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+}
+
+function TimelineRow({ evt }: { evt: TimelineEvent }) {
+  const layerCls = LAYER_COLORS[evt.layer] ?? 'bg-gray-700 text-gray-300'
+  const icon = EVENT_ICONS[evt.event_type] ?? '•'
+  return (
+    <div className="flex items-start gap-3 bg-gray-900 rounded-lg px-4 py-2.5 text-sm">
+      <span className="font-mono text-gray-500 w-12 flex-shrink-0 pt-0.5">{tc(evt.start_seconds)}</span>
+      <span className="text-base flex-shrink-0">{icon}</span>
+      <p className="text-gray-300 flex-1">{evt.description ?? evt.event_type}</p>
+      <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${layerCls}`}>
+        {evt.layer}
+      </span>
+    </div>
+  )
+}
+
 export default function ReportPage() {
   const { id } = useParams<{ id: string }>()
   const [report, setReport] = useState<Report | null>(null)
@@ -83,7 +117,7 @@ export default function ReportPage() {
     )
   }
 
-  const { metrics: m, transcript, feedback } = report
+  const { metrics: m, transcript, timeline, feedback } = report
   const durationMin = report.duration_seconds ? (report.duration_seconds / 60).toFixed(1) : '—'
   const silencePct = m.silence_ratio != null ? (m.silence_ratio * 100).toFixed(1) : '—'
   const energyCvPct = m.energy_cv != null ? (m.energy_cv * 100).toFixed(1) : '—'
@@ -226,6 +260,20 @@ export default function ReportPage() {
                 title="Áreas de mejora"
                 color="text-amber-400"
               />
+            </div>
+          </section>
+        )}
+
+        {/* Timeline Events */}
+        {timeline.length > 0 && (
+          <section>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
+              Eventos en la línea de tiempo
+            </h2>
+            <div className="space-y-1.5">
+              {timeline.map((evt, i) => (
+                <TimelineRow key={i} evt={evt} />
+              ))}
             </div>
           </section>
         )}

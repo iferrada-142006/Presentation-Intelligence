@@ -6,10 +6,11 @@ import { usePolling } from '../hooks/usePolling'
 type Phase = 'idle' | 'uploading' | 'processing' | 'done' | 'error'
 
 const STAGE_LABELS: Record<string, string> = {
-  extract: 'Extrayendo audio…',
-  speech: 'Transcribiendo voz…',
-  audio: 'Analizando audio…',
-  vision: 'Analizando presencia visual…',
+  extract:  'Extrayendo audio…',
+  speech:   'Transcribiendo voz…',
+  audio:    'Analizando audio…',
+  vision:   'Analizando presencia visual…',
+  features: 'Detectando eventos en el tiempo…',
   feedback: 'Generando retroalimentación con IA…',
 }
 

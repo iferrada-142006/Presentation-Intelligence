@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 
 
 class TranscriptSegmentOut(BaseModel):
@@ -37,6 +37,17 @@ class MetricsOut(BaseModel):
     body_movement_std: Optional[float] = None
 
 
+class TimelineEventOut(BaseModel):
+    layer: str
+    event_type: str
+    start_seconds: float
+    end_seconds: Optional[float]
+    duration_seconds: Optional[float]
+    magnitude: Optional[float]
+    description: Optional[str]
+    model_config = {"from_attributes": True}
+
+
 class FeedbackItemOut(BaseModel):
     category: str
     content: str
@@ -54,5 +65,6 @@ class ReportOut(BaseModel):
     processed_at: Optional[datetime]
     metrics: MetricsOut
     transcript: list[TranscriptSegmentOut]
+    timeline: list[TimelineEventOut]
     feedback: list[FeedbackItemOut]
     model_config = {"from_attributes": True}

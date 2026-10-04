@@ -59,6 +59,16 @@ export interface TranscriptSegment {
   confidence: number | null
 }
 
+export interface TimelineEvent {
+  layer: 'audio' | 'speech' | 'vision'
+  event_type: string
+  start_seconds: number
+  end_seconds: number | null
+  duration_seconds: number | null
+  magnitude: number | null
+  description: string | null
+}
+
 export interface FeedbackItem {
   category: 'strength' | 'improvement' | 'exercise'
   content: string
@@ -75,6 +85,7 @@ export interface Report {
   processed_at: string | null
   metrics: Metrics
   transcript: TranscriptSegment[]
+  timeline: TimelineEvent[]
   feedback: FeedbackItem[]
 }
 

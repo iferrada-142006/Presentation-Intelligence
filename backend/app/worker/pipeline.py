@@ -4,7 +4,8 @@ from faster_whisper import WhisperModel
 from sqlalchemy.orm import Session
 from app.models import (
     Presentation, VideoFile, ProcessingJob,
-    TranscriptSegment, PresentationMetric, AudioFeature, VideoFeature, FeedbackItem,
+    TranscriptSegment, PresentationMetric, AudioFeature, VideoFeature,
+    TimelineEvent, FeedbackItem,
 )
 from app.services.extraction.ffmpeg import get_video_metadata, extract_audio
 from app.services.speech.transcriber import transcribe
@@ -12,6 +13,7 @@ from app.services.speech.filler_words import detect_fillers, compute_filler_metr
 from app.services.audio.analyzer import analyze as analyze_audio, compute_audio_metrics
 from app.services.vision.analyzer import analyze as analyze_vision, compute_vision_metrics
 from app.config import settings
+from app.services.features.engine import run as run_feature_engine
 from app.services.feedback.llm import generate as generate_feedback
 
 logger = logging.getLogger(__name__)
@@ -198,8 +200,24 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
 
         _set_stage(job, "vision", 83, db)
 
-        # ── Stage 5: LLM FEEDBACK ────────────────────────────────────────────
-        _set_stage(job, "feedback", 85, db)
+        # ── Stage 5: FEATURE ENGINE ──────────────────────────────────────────
+        _set_stage(job, "features", 84, db)
+
+        timeline_events = run_feature_engine(
+            presentation.id, db, language=presentation.language
+        )
+        if timeline_events:
+            db.bulk_insert_mappings(TimelineEvent, [
+                {"presentation_id": presentation.id, **evt}
+                for evt in timeline_events
+            ])
+            db.commit()
+        logger.info(f"[job {job_id}] features done — {len(timeline_events)} events")
+
+        _set_stage(job, "features", 87, db)
+
+        # ── Stage 6: LLM FEEDBACK ────────────────────────────────────────────
+        _set_stage(job, "feedback", 88, db)
 
         # Rebuild metric dict from what was just written to DB
         metric_rows = db.query(PresentationMetric).filter(
@@ -219,6 +237,7 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
             },
             "metrics": metrics_for_llm,
             "transcript_text": transcript_text,
+            "timeline_events": timeline_events,
         }
 
         feedback_items = generate_feedback(presentation_data, language=presentation.language)
