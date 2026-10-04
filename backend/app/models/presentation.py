@@ -21,6 +21,7 @@ class Presentation(Base):
     transcript_segments = relationship("TranscriptSegment", back_populates="presentation")
     metrics = relationship("PresentationMetric", back_populates="presentation")
     audio_features = relationship("AudioFeature", back_populates="presentation")
+    feedback_items = relationship("FeedbackItem", back_populates="presentation")
 
 
 class VideoFile(Base):
@@ -107,3 +108,19 @@ class AudioFeature(Base):
     local_wpm = Column(Float, nullable=True)
 
     presentation = relationship("Presentation", back_populates="audio_features")
+
+
+class FeedbackItem(Base):
+    __tablename__ = "feedback_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    presentation_id = Column(Integer, ForeignKey("presentations.id"), nullable=False)
+    category = Column(String(50), nullable=False)  # strength | improvement | exercise
+    content = Column(Text, nullable=False)
+    evidence = Column(Text, nullable=True)          # metric or quote that grounds this
+    timestamp_ref = Column(Float, nullable=True)    # optional second reference
+    llm_model = Column(String(100), nullable=True)
+    llm_prompt_version = Column(String(20), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    presentation = relationship("Presentation", back_populates="feedback_items")

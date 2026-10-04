@@ -4,8 +4,10 @@ import aiofiles
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Presentation, VideoFile, ProcessingJob
+from sqlalchemy.orm import joinedload
+from app.models import Presentation, VideoFile, ProcessingJob, TranscriptSegment, PresentationMetric, FeedbackItem
 from app.schemas.presentation import PresentationCreate, PresentationStatus
+from app.schemas.report import ReportOut, MetricsOut, TranscriptSegmentOut, FeedbackItemOut
 from app.config import settings
 
 router = APIRouter(prefix="/api/presentations", tags=["presentations"])
@@ -80,9 +82,12 @@ async def upload_presentation(
 
 @router.get("/{presentation_id}/status", response_model=PresentationStatus)
 def get_status(presentation_id: int, db: Session = Depends(get_db)):
-    presentation = db.query(Presentation).filter(
-        Presentation.id == presentation_id
-    ).first()
+    presentation = (
+        db.query(Presentation)
+        .options(joinedload(Presentation.job))
+        .filter(Presentation.id == presentation_id)
+        .first()
+    )
     if not presentation:
         raise HTTPException(status_code=404, detail="Presentación no encontrada")
     return presentation
@@ -91,3 +96,49 @@ def get_status(presentation_id: int, db: Session = Depends(get_db)):
 @router.get("/", response_model=list[PresentationStatus])
 def list_presentations(db: Session = Depends(get_db)):
     return db.query(Presentation).order_by(Presentation.uploaded_at.desc()).all()
+
+
+@router.get("/{presentation_id}/report", response_model=ReportOut)
+def get_report(presentation_id: int, db: Session = Depends(get_db)):
+    presentation = db.query(Presentation).filter(
+        Presentation.id == presentation_id
+    ).first()
+    if not presentation:
+        raise HTTPException(status_code=404, detail="Presentación no encontrada")
+    if presentation.status not in ("complete",):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Reporte no disponible aún — estado actual: {presentation.status}",
+        )
+
+    # Pivot presentation_metrics rows → flat dict
+    raw_metrics = db.query(PresentationMetric).filter(
+        PresentationMetric.presentation_id == presentation_id
+    ).all()
+    metrics_dict = {m.metric_name: m.value for m in raw_metrics}
+    metrics = MetricsOut(**{k: metrics_dict.get(k) for k in MetricsOut.model_fields})
+
+    # Transcript segments ordered by start time
+    segments = db.query(TranscriptSegment).filter(
+        TranscriptSegment.presentation_id == presentation_id
+    ).order_by(TranscriptSegment.start_seconds).all()
+    transcript = [TranscriptSegmentOut.model_validate(s) for s in segments]
+
+    # Feedback items
+    feedback_rows = db.query(FeedbackItem).filter(
+        FeedbackItem.presentation_id == presentation_id
+    ).order_by(FeedbackItem.id).all()
+    feedback = [FeedbackItemOut.model_validate(f) for f in feedback_rows]
+
+    return ReportOut(
+        id=presentation.id,
+        title=presentation.title,
+        language=presentation.language,
+        status=presentation.status,
+        duration_seconds=presentation.duration_seconds,
+        uploaded_at=presentation.uploaded_at,
+        processed_at=presentation.processed_at,
+        metrics=metrics,
+        transcript=transcript,
+        feedback=feedback,
+    )

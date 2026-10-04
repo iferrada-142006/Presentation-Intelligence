@@ -4,13 +4,14 @@ from faster_whisper import WhisperModel
 from sqlalchemy.orm import Session
 from app.models import (
     Presentation, VideoFile, ProcessingJob,
-    TranscriptSegment, PresentationMetric, AudioFeature,
+    TranscriptSegment, PresentationMetric, AudioFeature, FeedbackItem,
 )
 from app.services.extraction.ffmpeg import get_video_metadata, extract_audio
 from app.services.speech.transcriber import transcribe
 from app.services.speech.filler_words import detect_fillers, compute_filler_metrics
 from app.services.audio.analyzer import analyze as analyze_audio, compute_audio_metrics
 from app.config import settings
+from app.services.feedback.llm import generate as generate_feedback
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,45 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
             f"silence ratio={audio_result.silence_duration_seconds/audio_result.total_duration_seconds:.1%}"
         )
 
-        # Stages 4+ (video CV, analytics, rubric, feedback) → future phases
+        # ── Stage 4: LLM FEEDBACK ────────────────────────────────────────────
+        _set_stage(job, "feedback", 80, db)
+
+        # Rebuild metric dict from what was just written to DB
+        metric_rows = db.query(PresentationMetric).filter(
+            PresentationMetric.presentation_id == presentation.id
+        ).all()
+        metrics_for_llm = {m.metric_name: m.value for m in metric_rows}
+
+        # Build transcript text (first 4000 chars to stay within token budget)
+        transcript_rows = db.query(TranscriptSegment).filter(
+            TranscriptSegment.presentation_id == presentation.id
+        ).order_by(TranscriptSegment.start_seconds).all()
+        transcript_text = " ".join(r.text.strip() for r in transcript_rows)[:4000]
+
+        presentation_data = {
+            "presentation": {
+                "duration_seconds": presentation.duration_seconds,
+            },
+            "metrics": metrics_for_llm,
+            "transcript_text": transcript_text,
+        }
+
+        feedback_items = generate_feedback(presentation_data, language=presentation.language)
+        for item in feedback_items:
+            db.add(FeedbackItem(
+                presentation_id=presentation.id,
+                category=item["category"],
+                content=item["content"],
+                evidence=item.get("evidence"),
+                llm_model=item.get("llm_model"),
+                llm_prompt_version=item.get("llm_prompt_version"),
+            ))
+        db.commit()
+
+        logger.info(f"[job {job_id}] feedback done — {len(feedback_items)} items")
+        _set_stage(job, "feedback", 95, db)
+
+        # ── Complete ─────────────────────────────────────────────────────────
         job.status = "complete"
         job.current_stage = None
         job.progress_pct = 100

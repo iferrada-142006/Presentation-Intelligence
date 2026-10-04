@@ -1,0 +1,101 @@
+const BASE = '/api'
+
+export interface UploadResponse {
+  id: number
+  title: string
+  status: string
+  uploaded_at: string
+  job_id: number
+}
+
+export interface JobStatus {
+  id: number
+  status: string
+  current_stage: string | null
+  progress_pct: number
+  error_message: string | null
+}
+
+export interface StatusResponse {
+  id: number
+  title: string
+  status: string
+  duration_seconds: number | null
+  uploaded_at: string
+  processed_at: string | null
+  job: JobStatus | null
+}
+
+export interface Metrics {
+  total_words: number | null
+  avg_wpm: number | null
+  filler_count: number | null
+  filler_rate_per_min: number | null
+  pause_count: number | null
+  avg_pause_duration: number | null
+  max_pause_duration: number | null
+  pause_rate_per_min: number | null
+  silence_ratio: number | null
+  energy_cv: number | null
+  wpm_std: number | null
+  detected_language_prob: number | null
+}
+
+export interface TranscriptSegment {
+  start_seconds: number
+  end_seconds: number
+  text: string
+  word_count: number
+  confidence: number | null
+}
+
+export interface FeedbackItem {
+  category: 'strength' | 'improvement' | 'exercise'
+  content: string
+  evidence: string | null
+}
+
+export interface Report {
+  id: number
+  title: string
+  language: string
+  status: string
+  duration_seconds: number | null
+  uploaded_at: string
+  processed_at: string | null
+  metrics: Metrics
+  transcript: TranscriptSegment[]
+  feedback: FeedbackItem[]
+}
+
+export async function uploadPresentation(
+  file: File,
+  title: string,
+  language: string,
+): Promise<UploadResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('title', title)
+  form.append('language', language)
+  const res = await fetch(`${BASE}/presentations/`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'Upload failed')
+  }
+  return res.json()
+}
+
+export async function getStatus(id: number): Promise<StatusResponse> {
+  const res = await fetch(`${BASE}/presentations/${id}/status`)
+  if (!res.ok) throw new Error('Status fetch failed')
+  return res.json()
+}
+
+export async function getReport(id: number): Promise<Report> {
+  const res = await fetch(`${BASE}/presentations/${id}/report`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'Report fetch failed')
+  }
+  return res.json()
+}

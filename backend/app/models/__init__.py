@@ -5,6 +5,7 @@ from app.models.presentation import (
     TranscriptSegment,
     PresentationMetric,
     AudioFeature,
+    FeedbackItem,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "TranscriptSegment",
     "PresentationMetric",
     "AudioFeature",
+    "FeedbackItem",
 ]
