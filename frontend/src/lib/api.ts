@@ -112,6 +112,35 @@ export async function getStatus(id: number): Promise<StatusResponse> {
   return res.json()
 }
 
+export interface AudioFrame {
+  t: number
+  rms: number | null
+  wpm: number | null
+  silence: boolean
+}
+
+export interface VideoFrame {
+  t: number
+  yaw: number | null
+  face: boolean
+}
+
+export interface ChartData {
+  duration_seconds: number | null
+  audio: AudioFrame[]
+  video: VideoFrame[]
+}
+
+export function videoUrl(id: number): string {
+  return `${BASE}/presentations/${id}/video`
+}
+
+export async function getChartData(id: number): Promise<ChartData> {
+  const res = await fetch(`${BASE}/presentations/${id}/chart-data`)
+  if (!res.ok) throw new Error('Chart data fetch failed')
+  return res.json()
+}
+
 export async function getReport(id: number): Promise<Report> {
   const res = await fetch(`${BASE}/presentations/${id}/report`)
   if (!res.ok) {

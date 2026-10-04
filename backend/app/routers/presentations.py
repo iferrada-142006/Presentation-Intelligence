@@ -1,14 +1,24 @@
 import os
+import re
 import uuid
 import aiofiles
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from sqlalchemy.orm import joinedload
-from app.models import Presentation, VideoFile, ProcessingJob, TranscriptSegment, PresentationMetric, TimelineEvent, FeedbackItem
+from app.models import Presentation, VideoFile, ProcessingJob, TranscriptSegment, PresentationMetric, AudioFeature, VideoFeature, TimelineEvent, FeedbackItem
 from app.schemas.presentation import PresentationCreate, PresentationStatus
 from app.schemas.report import ReportOut, MetricsOut, TranscriptSegmentOut, TimelineEventOut, FeedbackItemOut
 from app.config import settings
+
+_VIDEO_CONTENT_TYPES = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+}
 
 router = APIRouter(prefix="/api/presentations", tags=["presentations"])
 
@@ -149,3 +159,103 @@ def get_report(presentation_id: int, db: Session = Depends(get_db)):
         timeline=timeline,
         feedback=feedback,
     )
+
+
+@router.get("/{presentation_id}/video")
+def stream_video(
+    presentation_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    video = db.query(VideoFile).filter(
+        VideoFile.presentation_id == presentation_id
+    ).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video no encontrado")
+    if not os.path.exists(video.file_path):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
+
+    file_size = os.path.getsize(video.file_path)
+    ext = os.path.splitext(video.file_path)[1].lower()
+    content_type = _VIDEO_CONTENT_TYPES.get(ext, "video/mp4")
+
+    def _iter(start: int, end: int):
+        with open(video.file_path, "rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = f.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    range_header = request.headers.get("Range")
+    if range_header:
+        m = re.match(r"bytes=(\d+)-(\d*)", range_header)
+        if m:
+            start = int(m.group(1))
+            end = int(m.group(2)) if m.group(2) else file_size - 1
+            end = min(end, file_size - 1)
+            return StreamingResponse(
+                _iter(start, end),
+                status_code=206,
+                media_type=content_type,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(end - start + 1),
+                },
+            )
+
+    return StreamingResponse(
+        _iter(0, file_size - 1),
+        media_type=content_type,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+        },
+    )
+
+
+@router.get("/{presentation_id}/chart-data")
+def get_chart_data(presentation_id: int, db: Session = Depends(get_db)):
+    presentation = db.query(Presentation).filter(
+        Presentation.id == presentation_id
+    ).first()
+    if not presentation:
+        raise HTTPException(status_code=404, detail="Presentación no encontrada")
+
+    audio_rows = (
+        db.query(AudioFeature)
+        .filter(AudioFeature.presentation_id == presentation_id)
+        .order_by(AudioFeature.timestamp_seconds)
+        .all()
+    )
+    video_rows = (
+        db.query(VideoFeature)
+        .filter(VideoFeature.presentation_id == presentation_id)
+        .order_by(VideoFeature.timestamp_seconds)
+        .all()
+    )
+
+    return {
+        "duration_seconds": presentation.duration_seconds,
+        "audio": [
+            {
+                "t": r.timestamp_seconds,
+                "rms": round(r.energy_rms, 4) if r.energy_rms is not None else None,
+                "wpm": round(r.local_wpm, 1) if r.local_wpm is not None else None,
+                "silence": bool(r.is_silence),
+            }
+            for r in audio_rows
+        ],
+        "video": [
+            {
+                "t": r.timestamp_seconds,
+                "yaw": round(r.head_yaw, 1) if r.head_yaw is not None else None,
+                "face": bool(r.face_detected),
+            }
+            for r in video_rows
+        ],
+    }

@@ -129,9 +129,14 @@ export default function ReportPage() {
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
-            <Link to="/" className="text-indigo-400 text-sm hover:underline mb-2 inline-block">
-              ← Nueva presentación
-            </Link>
+            <div className="flex gap-4 mb-2">
+              <Link to="/" className="text-indigo-400 text-sm hover:underline">
+                ← Nueva presentación
+              </Link>
+              <Link to={`/dashboard/${report.id}`} className="text-emerald-400 text-sm hover:underline">
+                Ver dashboard ▶
+              </Link>
+            </div>
             <h1 className="text-2xl font-bold text-white">{report.title}</h1>
             <p className="text-gray-500 text-sm mt-1">
               {report.language === 'es' ? 'Español' : 'English'} · {durationMin} min ·{' '}
