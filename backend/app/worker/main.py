@@ -1,11 +1,12 @@
 """
-Worker process: polls processing_jobs table and runs the pipeline.
-One job at a time (MAX_CONCURRENT_JOBS=1).
+Worker process: polls processing_jobs and runs the pipeline.
+The Whisper model is loaded once at startup and reused across jobs.
 """
 import time
 import logging
 from app.database import SessionLocal
 from app.models import ProcessingJob
+from app.services.speech.transcriber import load_model
 from app.worker import pipeline
 
 logging.basicConfig(
@@ -14,11 +15,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL = 5  # seconds
+POLL_INTERVAL = 5
 
 
 def main():
-    logger.info("Worker started — polling every %ds", POLL_INTERVAL)
+    logger.info("Loading Whisper model at startup...")
+    whisper_model = load_model()
+    logger.info("Worker ready — polling every %ds", POLL_INTERVAL)
+
     while True:
         db = SessionLocal()
         try:
@@ -31,7 +35,7 @@ def main():
             )
             if job:
                 logger.info(f"Picked up job {job.id} (presentation {job.presentation_id})")
-                pipeline.run(job.id, db)
+                pipeline.run(job.id, db, whisper_model)
             else:
                 time.sleep(POLL_INTERVAL)
         except Exception as e:

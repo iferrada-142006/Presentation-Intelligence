@@ -8,3 +8,4 @@ pydantic-settings==2.6.1
 aiofiles==24.1.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+faster-whisper==1.0.3

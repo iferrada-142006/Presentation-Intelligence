@@ -1,3 +1,15 @@
-from app.models.presentation import Presentation, VideoFile, ProcessingJob
+from app.models.presentation import (
+    Presentation,
+    VideoFile,
+    ProcessingJob,
+    TranscriptSegment,
+    PresentationMetric,
+)
 
-__all__ = ["Presentation", "VideoFile", "ProcessingJob"]
+__all__ = [
+    "Presentation",
+    "VideoFile",
+    "ProcessingJob",
+    "TranscriptSegment",
+    "PresentationMetric",
+]
