@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     Presentation, VideoFile, ProcessingJob,
     TranscriptSegment, PresentationMetric, AudioFeature, VideoFeature,
-    TimelineEvent, FeedbackItem,
+    RubricScore, TimelineEvent, FeedbackItem,
 )
 from app.services.extraction.ffmpeg import get_video_metadata, extract_audio
 from app.services.speech.transcriber import transcribe
@@ -14,6 +14,7 @@ from app.services.audio.analyzer import analyze as analyze_audio, compute_audio_
 from app.services.vision.analyzer import analyze as analyze_vision, compute_vision_metrics
 from app.config import settings
 from app.services.features.engine import run as run_feature_engine
+from app.services.rubric.engine import run as run_rubric
 from app.services.feedback.llm import generate as generate_feedback
 
 logger = logging.getLogger(__name__)
@@ -216,8 +217,22 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
 
         _set_stage(job, "features", 87, db)
 
-        # ── Stage 6: LLM FEEDBACK ────────────────────────────────────────────
-        _set_stage(job, "feedback", 88, db)
+        # ── Stage 7: RUBRIC ENGINE ───────────────────────────────────────────
+        _set_stage(job, "rubric", 88, db)
+
+        rubric_results = run_rubric(metrics_for_llm, timeline_events)
+        if rubric_results:
+            db.bulk_insert_mappings(RubricScore, [
+                {"presentation_id": presentation.id, **r}
+                for r in rubric_results
+            ])
+            db.commit()
+        logger.info(f"[job {job_id}] rubric done — {len(rubric_results)} dimensions scored")
+
+        _set_stage(job, "rubric", 91, db)
+
+        # ── Stage 8: LLM FEEDBACK ────────────────────────────────────────────
+        _set_stage(job, "feedback", 92, db)
 
         # Rebuild metric dict from what was just written to DB
         metric_rows = db.query(PresentationMetric).filter(
@@ -238,6 +253,7 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
             "metrics": metrics_for_llm,
             "transcript_text": transcript_text,
             "timeline_events": timeline_events,
+            "rubric_scores": rubric_results,
         }
 
         feedback_items = generate_feedback(presentation_data, language=presentation.language)

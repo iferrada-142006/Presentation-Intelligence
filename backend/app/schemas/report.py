@@ -37,6 +37,17 @@ class MetricsOut(BaseModel):
     body_movement_std: Optional[float] = None
 
 
+class RubricScoreOut(BaseModel):
+    dimension: str
+    score: float
+    level: int
+    level_label: str
+    primary_metric: Optional[str]
+    primary_value: Optional[float]
+    evidence: Optional[str]
+    model_config = {"from_attributes": True}
+
+
 class TimelineEventOut(BaseModel):
     layer: str
     event_type: str
@@ -64,6 +75,7 @@ class ReportOut(BaseModel):
     uploaded_at: datetime
     processed_at: Optional[datetime]
     metrics: MetricsOut
+    rubric: list[RubricScoreOut]
     transcript: list[TranscriptSegmentOut]
     timeline: list[TimelineEventOut]
     feedback: list[FeedbackItemOut]

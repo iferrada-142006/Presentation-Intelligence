@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getReport, Report, TimelineEvent } from '../lib/api'
+import { getReport, Report, RubricScore, TimelineEvent } from '../lib/api'
 
 function fmt(v: number | null, decimals = 1): string {
   if (v === null || v === undefined) return '—'
@@ -48,6 +48,56 @@ function FeedbackSection({ items, category, title, color }: {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+const DIMENSION_LABELS: Record<string, string> = {
+  verbal_rhythm:       'Ritmo Verbal',
+  filler_density:      'Muletillas',
+  silence_management:  'Gestión del Silencio',
+  vocal_dynamics:      'Dinámica Vocal',
+  visual_presence:     'Presencia Visual',
+}
+
+const LEVEL_COLORS = [
+  'bg-red-900 text-red-300 border-red-700',
+  'bg-orange-900 text-orange-300 border-orange-700',
+  'bg-yellow-900 text-yellow-300 border-yellow-700',
+  'bg-blue-900 text-blue-300 border-blue-700',
+  'bg-emerald-900 text-emerald-300 border-emerald-700',
+]
+const BAR_COLORS = ['#7f1d1d', '#7c2d12', '#78350f', '#1e3a5f', '#064e3b']
+
+function RubricCard({ r }: { r: RubricScore }) {
+  const label = DIMENSION_LABELS[r.dimension] ?? r.dimension
+  const barColor = BAR_COLORS[r.level] ?? '#374151'
+  const levelCls = LEVEL_COLORS[r.level] ?? LEVEL_COLORS[0]
+  return (
+    <div className="bg-gray-800 rounded-xl p-4 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-medium text-white">{label}</p>
+        <span className={`text-xs px-2 py-0.5 rounded border flex-shrink-0 ${levelCls}`}>
+          {r.level_label}
+        </span>
+      </div>
+      {/* Score bar */}
+      <div className="space-y-1">
+        <div className="flex justify-between text-xs text-gray-500">
+          <span>0</span>
+          <span className="text-white font-bold text-sm">{r.score.toFixed(0)}</span>
+          <span>100</span>
+        </div>
+        <div className="w-full bg-gray-700 rounded-full h-2">
+          <div
+            className="h-2 rounded-full transition-all"
+            style={{ width: `${r.score}%`, backgroundColor: barColor }}
+          />
+        </div>
+      </div>
+      {r.evidence && (
+        <p className="text-xs text-gray-500 leading-relaxed">{r.evidence}</p>
+      )}
     </div>
   )
 }
@@ -117,7 +167,7 @@ export default function ReportPage() {
     )
   }
 
-  const { metrics: m, transcript, timeline, feedback } = report
+  const { metrics: m, rubric, transcript, timeline, feedback } = report
   const durationMin = report.duration_seconds ? (report.duration_seconds / 60).toFixed(1) : '—'
   const silencePct = m.silence_ratio != null ? (m.silence_ratio * 100).toFixed(1) : '—'
   const energyCvPct = m.energy_cv != null ? (m.energy_cv * 100).toFixed(1) : '—'
@@ -234,6 +284,22 @@ export default function ReportPage() {
             </div>
             <p className="text-xs text-gray-600 mt-3">
               Confianza 0.75–0.9 · Medido desde landmarks de MediaPipe, sin inferencia de intención
+            </p>
+          </section>
+        )}
+
+        {/* Rubric scores */}
+        {rubric.length > 0 && (
+          <section>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
+              Dimensiones evaluadas — Rúbrica v1.0
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {rubric.map((r, i) => <RubricCard key={i} r={r} />)}
+            </div>
+            <p className="text-xs text-gray-600 mt-3">
+              Scores calculados desde métricas medidas con fórmulas documentadas y transparentes.
+              No representan juicio de valor — indican distancia respecto al rango de referencia.
             </p>
           </section>
         )}

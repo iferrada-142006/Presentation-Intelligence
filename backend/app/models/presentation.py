@@ -23,6 +23,7 @@ class Presentation(Base):
     audio_features = relationship("AudioFeature", back_populates="presentation")
     video_features = relationship("VideoFeature", back_populates="presentation")
     timeline_events = relationship("TimelineEvent", back_populates="presentation")
+    rubric_scores = relationship("RubricScore", back_populates="presentation")
     feedback_items = relationship("FeedbackItem", back_populates="presentation")
 
 
@@ -129,6 +130,24 @@ class VideoFeature(Base):
     body_movement = Column(Float, nullable=True)
 
     presentation = relationship("Presentation", back_populates="video_features")
+
+
+class RubricScore(Base):
+    __tablename__ = "rubric_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    presentation_id = Column(Integer, ForeignKey("presentations.id"), nullable=False)
+    dimension = Column(String(50), nullable=False)
+    # verbal_rhythm | filler_density | silence_management | vocal_dynamics | visual_presence
+    score = Column(Float, nullable=False)           # 0–100
+    level = Column(Integer, nullable=False)         # 0–4
+    level_label = Column(String(50), nullable=False)
+    primary_metric = Column(String(100), nullable=True)
+    primary_value = Column(Float, nullable=True)
+    evidence = Column(Text, nullable=True)          # human-readable explanation
+    rubric_version = Column(String(20), default="v1.0")
+
+    presentation = relationship("Presentation", back_populates="rubric_scores")
 
 
 class TimelineEvent(Base):

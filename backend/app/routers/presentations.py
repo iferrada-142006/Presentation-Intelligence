@@ -7,9 +7,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from sqlalchemy.orm import joinedload
-from app.models import Presentation, VideoFile, ProcessingJob, TranscriptSegment, PresentationMetric, AudioFeature, VideoFeature, TimelineEvent, FeedbackItem
+from app.models import Presentation, VideoFile, ProcessingJob, TranscriptSegment, PresentationMetric, AudioFeature, VideoFeature, RubricScore, TimelineEvent, FeedbackItem
 from app.schemas.presentation import PresentationCreate, PresentationStatus
-from app.schemas.report import ReportOut, MetricsOut, TranscriptSegmentOut, TimelineEventOut, FeedbackItemOut
+from app.schemas.report import ReportOut, MetricsOut, RubricScoreOut, TranscriptSegmentOut, TimelineEventOut, FeedbackItemOut
 from app.config import settings
 
 _VIDEO_CONTENT_TYPES = {
@@ -134,6 +134,12 @@ def get_report(presentation_id: int, db: Session = Depends(get_db)):
     ).order_by(TranscriptSegment.start_seconds).all()
     transcript = [TranscriptSegmentOut.model_validate(s) for s in segments]
 
+    # Rubric scores
+    rubric_rows = db.query(RubricScore).filter(
+        RubricScore.presentation_id == presentation_id
+    ).all()
+    rubric = [RubricScoreOut.model_validate(r) for r in rubric_rows]
+
     # Timeline events ordered by start time
     event_rows = db.query(TimelineEvent).filter(
         TimelineEvent.presentation_id == presentation_id
@@ -155,6 +161,7 @@ def get_report(presentation_id: int, db: Session = Depends(get_db)):
         uploaded_at=presentation.uploaded_at,
         processed_at=presentation.processed_at,
         metrics=metrics,
+        rubric=rubric,
         transcript=transcript,
         timeline=timeline,
         feedback=feedback,

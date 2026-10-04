@@ -6,6 +6,7 @@ from app.models.presentation import (
     PresentationMetric,
     AudioFeature,
     VideoFeature,
+    RubricScore,
     TimelineEvent,
     FeedbackItem,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "PresentationMetric",
     "AudioFeature",
     "VideoFeature",
+    "RubricScore",
     "TimelineEvent",
     "FeedbackItem",
 ]

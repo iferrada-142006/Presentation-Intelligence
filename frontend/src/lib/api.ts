@@ -59,6 +59,16 @@ export interface TranscriptSegment {
   confidence: number | null
 }
 
+export interface RubricScore {
+  dimension: string
+  score: number
+  level: number
+  level_label: string
+  primary_metric: string | null
+  primary_value: number | null
+  evidence: string | null
+}
+
 export interface TimelineEvent {
   layer: 'audio' | 'speech' | 'vision'
   event_type: string
@@ -84,6 +94,7 @@ export interface Report {
   uploaded_at: string
   processed_at: string | null
   metrics: Metrics
+  rubric: RubricScore[]
   transcript: TranscriptSegment[]
   timeline: TimelineEvent[]
   feedback: FeedbackItem[]

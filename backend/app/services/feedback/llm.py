@@ -66,6 +66,18 @@ BODY / HEAD (from video — confidence 0.75–0.9):
 - Head pitch mean ± std: {round(float(m.get('head_pitch_mean', 0)), 1)}° ± {round(float(m.get('head_pitch_std', 0)), 1)}°  [+ = tilted down]
 - Body movement mean: {round(float(m.get('body_movement_mean', 0)) * 100, 2)} (normalized ×100)"""
 
+    # Rubric scores block — only present for Phase 8+ jobs
+    rubric = data.get("rubric_scores", [])
+    rubric_block = ""
+    if rubric:
+        lines = []
+        for r in rubric:
+            dim = r.get("dimension", "").replace("_", " ").title()
+            lines.append(
+                f"  {dim}: {r.get('score', 0):.0f}/100 ({r.get('level_label', '')}) — {r.get('evidence', '')}"
+            )
+        rubric_block = "\n\nRUBRIC SCORES (0–100, computed from measurements — cite these in feedback):\n" + "\n".join(lines)
+
     # Timeline events block — only present for Phase 6+ jobs
     events = data.get("timeline_events", [])
     events_block = ""
@@ -81,7 +93,7 @@ BODY / HEAD (from video — confidence 0.75–0.9):
     return f"""You are an evidence-based communication coach analyzing a {lang_label} presentation.
 
 MEASURED DATA (objective):
-{metrics_block}{events_block}
+{metrics_block}{rubric_block}{events_block}
 
 TRANSCRIPT:
 {transcript}
