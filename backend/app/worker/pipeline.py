@@ -4,21 +4,29 @@ from faster_whisper import WhisperModel
 from sqlalchemy.orm import Session
 from app.models import (
     Presentation, VideoFile, ProcessingJob,
-    TranscriptSegment, PresentationMetric,
+    TranscriptSegment, PresentationMetric, AudioFeature,
 )
 from app.services.extraction.ffmpeg import get_video_metadata, extract_audio
 from app.services.speech.transcriber import transcribe
 from app.services.speech.filler_words import detect_fillers, compute_filler_metrics
+from app.services.audio.analyzer import analyze as analyze_audio, compute_audio_metrics
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+STAGES = {
+    "extract":  (5,  20),
+    "speech":   (20, 55),
+    "audio":    (55, 80),
+    # video, analytics, rubric, feedback → future phases
+}
 
 
 def _set_stage(job: ProcessingJob, stage: str, pct: int, db: Session):
     job.current_stage = stage
     job.progress_pct = pct
     db.commit()
-    logger.info(f"[job {job.id}] stage={stage} progress={pct}%")
+    logger.info(f"[job {job.id}] stage={stage} {pct}%")
 
 
 def _save_metric(presentation_id: int, name: str, value: float,
@@ -26,7 +34,7 @@ def _save_metric(presentation_id: int, name: str, value: float,
     db.add(PresentationMetric(
         presentation_id=presentation_id,
         metric_name=name,
-        value=value,
+        value=round(float(value), 6),
         unit=unit,
         confidence=confidence,
     ))
@@ -51,7 +59,7 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
         presentation.status = "processing"
         db.commit()
 
-        # ── Stage 1: EXTRACT ────────────────────────────────────────────────
+        # ── Stage 1: EXTRACT ─────────────────────────────────────────────────
         _set_stage(job, "extract", 5, db)
         metadata = get_video_metadata(video_file.file_path)
         video_file.duration_seconds = metadata["duration_seconds"]
@@ -66,16 +74,14 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
         db.commit()
         logger.info(f"[job {job_id}] audio → {audio_path}")
 
-        # ── Stage 2: SPEECH ─────────────────────────────────────────────────
+        # ── Stage 2: SPEECH ──────────────────────────────────────────────────
         _set_stage(job, "speech", 20, db)
-        result = transcribe(audio_path, whisper_model, language=presentation.language)
+        speech_result = transcribe(audio_path, whisper_model, language=presentation.language)
 
-        # Persist transcript segments
         total_words = 0
-        for seg in result["segments"]:
+        for seg in speech_result["segments"]:
             word_count = len(seg["words"]) if seg["words"] else len(seg["text"].split())
             total_words += word_count
-            # avg_logprob is a proxy for confidence; convert to 0-1 range (logprob ∈ [-∞, 0])
             confidence = max(0.0, min(1.0, 1.0 + seg.get("avg_logprob", -0.5)))
             db.add(TranscriptSegment(
                 presentation_id=presentation.id,
@@ -87,37 +93,69 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
                 words_json=seg["words"],
             ))
 
-        _set_stage(job, "speech", 55, db)
+        _set_stage(job, "speech", 45, db)
 
-        # ── Filler word detection ────────────────────────────────────────────
-        filler_occurrences = detect_fillers(result["segments"], result["language"])
+        filler_occurrences = detect_fillers(speech_result["segments"], speech_result["language"])
         filler_metrics = compute_filler_metrics(
             filler_occurrences,
             total_words,
-            result["duration_seconds"],
-        )
-        logger.info(
-            f"[job {job_id}] words={total_words} fillers={filler_metrics['filler_count']}"
+            speech_result["duration_seconds"],
         )
 
-        # ── Persist speech metrics ───────────────────────────────────────────
-        duration = presentation.duration_seconds or result["duration_seconds"]
+        duration = presentation.duration_seconds or speech_result["duration_seconds"]
         avg_wpm = round((total_words / duration) * 60, 1) if duration > 0 else 0.0
 
-        metrics = [
-            ("total_words",         total_words,                        "words",        1.0),
-            ("avg_wpm",             avg_wpm,                            "wpm",          0.9),
-            ("filler_count",        filler_metrics["filler_count"],     "count",        0.7),
-            ("filler_rate_per_min", filler_metrics["filler_rate_per_minute"], "count/min", 0.7),
-            ("detected_language_prob", result["language_probability"],  "probability",  1.0),
-        ]
-        for name, value, unit, conf in metrics:
+        for name, value, unit, conf in [
+            ("total_words",          total_words,                              "words",      1.0),
+            ("avg_wpm",              avg_wpm,                                  "wpm",        0.9),
+            ("filler_count",         filler_metrics["filler_count"],           "count",      0.7),
+            ("filler_rate_per_min",  filler_metrics["filler_rate_per_minute"], "count/min",  0.7),
+            ("detected_language_prob", speech_result["language_probability"],  "probability",1.0),
+        ]:
             _save_metric(presentation.id, name, float(value), unit, conf, db)
 
-        _set_stage(job, "speech", 70, db)
+        _set_stage(job, "speech", 55, db)
+        logger.info(f"[job {job_id}] speech done — {total_words} words, {avg_wpm} WPM, "
+                    f"{filler_metrics['filler_count']} fillers")
 
-        # Stages 3-6 (audio analysis, video CV, analytics, feedback) → future phases
-        # Progress jumps to complete for now
+        # ── Stage 3: AUDIO ANALYSIS ──────────────────────────────────────────
+        _set_stage(job, "audio", 58, db)
+
+        # Pass transcript word data so audio stage can compute local WPM per frame
+        segments_for_audio = [
+            {"words": seg["words"]} for seg in speech_result["segments"]
+        ]
+        audio_result = analyze_audio(audio_path, segments_for_audio)
+
+        # Bulk-insert audio features (one row per frame)
+        db.bulk_insert_mappings(AudioFeature, [
+            {
+                "presentation_id": presentation.id,
+                "timestamp_seconds": t,
+                "window_seconds": 0.5,
+                "energy_rms": round(float(rms), 6),
+                "is_silence": sil,
+                "local_wpm": round(float(wpm), 2),
+            }
+            for t, rms, sil, wpm in zip(
+                audio_result.frame_times,
+                audio_result.frame_rms,
+                audio_result.frame_is_silence,
+                audio_result.frame_local_wpm,
+            )
+        ])
+
+        _set_stage(job, "audio", 72, db)
+
+        for name, value, unit, conf in compute_audio_metrics(audio_result):
+            _save_metric(presentation.id, name, float(value), unit, conf, db)
+
+        logger.info(
+            f"[job {job_id}] audio done — {len(audio_result.pauses)} pauses, "
+            f"silence ratio={audio_result.silence_duration_seconds/audio_result.total_duration_seconds:.1%}"
+        )
+
+        # Stages 4+ (video CV, analytics, rubric, feedback) → future phases
         job.status = "complete"
         job.current_stage = None
         job.progress_pct = 100
@@ -125,7 +163,7 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
         presentation.status = "complete"
         presentation.processed_at = datetime.now(timezone.utc)
         db.commit()
-        logger.info(f"[job {job_id}] complete — {total_words} words, {avg_wpm} WPM")
+        logger.info(f"[job {job_id}] complete")
 
     except Exception as e:
         logger.exception(f"[job {job_id}] failed: {e}")

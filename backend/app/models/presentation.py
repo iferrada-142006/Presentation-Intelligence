@@ -20,6 +20,7 @@ class Presentation(Base):
     job = relationship("ProcessingJob", back_populates="presentation", uselist=False)
     transcript_segments = relationship("TranscriptSegment", back_populates="presentation")
     metrics = relationship("PresentationMetric", back_populates="presentation")
+    audio_features = relationship("AudioFeature", back_populates="presentation")
 
 
 class VideoFile(Base):
@@ -88,3 +89,21 @@ class PresentationMetric(Base):
     computed_at = Column(DateTime(timezone=True), server_default=func.now())
 
     presentation = relationship("Presentation", back_populates="metrics")
+
+
+class AudioFeature(Base):
+    __tablename__ = "audio_features"
+
+    id = Column(Integer, primary_key=True, index=True)
+    presentation_id = Column(Integer, ForeignKey("presentations.id"), nullable=False)
+    # Center of the analysis window
+    timestamp_seconds = Column(Float, nullable=False)
+    window_seconds = Column(Float, nullable=False, default=0.5)
+    # Volume — RMS energy of this window (relative, not dB)
+    energy_rms = Column(Float, nullable=True)
+    # True if energy < silence threshold for this presentation
+    is_silence = Column(Integer, nullable=True)  # 0/1 (bool-compatible)
+    # Words/min in this window derived from transcript timestamps
+    local_wpm = Column(Float, nullable=True)
+
+    presentation = relationship("Presentation", back_populates="audio_features")
