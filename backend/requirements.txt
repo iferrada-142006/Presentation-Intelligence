@@ -12,3 +12,5 @@ faster-whisper==1.0.3
 librosa==0.10.2
 soundfile==0.12.1
 anthropic==0.40.0
+mediapipe==0.10.18
+opencv-python-headless==4.10.0.84

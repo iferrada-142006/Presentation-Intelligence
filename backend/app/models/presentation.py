@@ -21,6 +21,7 @@ class Presentation(Base):
     transcript_segments = relationship("TranscriptSegment", back_populates="presentation")
     metrics = relationship("PresentationMetric", back_populates="presentation")
     audio_features = relationship("AudioFeature", back_populates="presentation")
+    video_features = relationship("VideoFeature", back_populates="presentation")
     feedback_items = relationship("FeedbackItem", back_populates="presentation")
 
 
@@ -108,6 +109,25 @@ class AudioFeature(Base):
     local_wpm = Column(Float, nullable=True)
 
     presentation = relationship("Presentation", back_populates="audio_features")
+
+
+class VideoFeature(Base):
+    __tablename__ = "video_features"
+
+    id = Column(Integer, primary_key=True, index=True)
+    presentation_id = Column(Integer, ForeignKey("presentations.id"), nullable=False)
+    timestamp_seconds = Column(Float, nullable=False)
+    frame_number = Column(Integer, nullable=True)
+    # Face detection (0/1)
+    face_detected = Column(Integer, nullable=True)
+    # Head orientation (degrees) via PnP from face landmarks
+    head_yaw = Column(Float, nullable=True)    # + = turned right
+    head_pitch = Column(Float, nullable=True)  # + = tilted down
+    head_roll = Column(Float, nullable=True)   # + = rolled right
+    # Body movement: mean landmark displacement (normalized 0–1) vs. prev frame
+    body_movement = Column(Float, nullable=True)
+
+    presentation = relationship("Presentation", back_populates="video_features")
 
 
 class FeedbackItem(Base):

@@ -9,6 +9,7 @@ const STAGE_LABELS: Record<string, string> = {
   extract: 'Extrayendo audio…',
   speech: 'Transcribiendo voz…',
   audio: 'Analizando audio…',
+  vision: 'Analizando presencia visual…',
   feedback: 'Generando retroalimentación con IA…',
 }
 

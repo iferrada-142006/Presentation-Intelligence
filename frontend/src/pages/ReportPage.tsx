@@ -112,7 +112,7 @@ export default function ReportPage() {
         {/* Metrics Grid */}
         <section>
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
-            Métricas observadas
+            Voz y audio
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             <MetricCard label="Duración" value={durationMin} unit="min" />
@@ -154,6 +154,50 @@ export default function ReportPage() {
             />
           </div>
         </section>
+
+        {/* Vision metrics — only shown if Phase 5 data is available */}
+        {m.face_visible_ratio != null && (
+          <section>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
+              Presencia visual — cámara y cuerpo
+            </h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              <MetricCard
+                label="Cara visible"
+                value={fmt((m.face_visible_ratio ?? 0) * 100, 0)}
+                unit="% frames"
+                note="Rostro detectado"
+              />
+              <MetricCard
+                label="Mirando al frente"
+                value={fmt((m.head_forward_ratio ?? 0) * 100, 0)}
+                unit="% tiempo"
+                note="|yaw|<20° y |pitch|<20°"
+              />
+              <MetricCard
+                label="Rotación horizontal"
+                value={fmt(m.head_yaw_mean)}
+                unit={`° ± ${fmt(m.head_yaw_std)}`}
+                note="+ = girado a la derecha"
+              />
+              <MetricCard
+                label="Inclinación vertical"
+                value={fmt(m.head_pitch_mean)}
+                unit={`° ± ${fmt(m.head_pitch_std)}`}
+                note="+ = inclinado hacia abajo"
+              />
+              <MetricCard
+                label="Movimiento corporal"
+                value={fmt((m.body_movement_mean ?? 0) * 100, 2)}
+                unit="norm ×100"
+                note="Hombros/cadera entre frames"
+              />
+            </div>
+            <p className="text-xs text-gray-600 mt-3">
+              Confianza 0.75–0.9 · Medido desde landmarks de MediaPipe, sin inferencia de intención
+            </p>
+          </section>
+        )}
 
         {/* Feedback */}
         {feedback.length > 0 && (

@@ -39,6 +39,7 @@ def _build_prompt(data: dict, language: str) -> str:
     wpm_ref = "120–150 WPM is typical for presentations"
 
     metrics_block = f"""
+SPEECH / AUDIO:
 - Duration: {p.get('duration_seconds', '?')}s ({duration_min} min)
 - Total words: {m.get('total_words', '?')}
 - Average WPM: {m.get('avg_wpm', '?')} ({wpm_ref})
@@ -49,6 +50,21 @@ def _build_prompt(data: dict, language: str) -> str:
 - Speech rate variability (WPM std): {m.get('wpm_std', '?')} — lower = more stable rhythm
 - Volume variability (energy CV): {round(float(m.get('energy_cv', 0)) * 100, 1)}% — higher = more dynamic
 """.strip()
+
+    # Append vision metrics if available (optional — only present for Phase 5+ jobs)
+    vision_keys = ("face_visible_ratio", "head_yaw_mean", "head_yaw_std",
+                   "head_pitch_mean", "head_forward_ratio", "body_movement_mean")
+    if any(m.get(k) is not None for k in vision_keys):
+        face_pct = round(float(m.get("face_visible_ratio", 0)) * 100, 1)
+        forward_pct = round(float(m.get("head_forward_ratio", 0)) * 100, 1)
+        metrics_block += f"""
+
+BODY / HEAD (from video — confidence 0.75–0.9):
+- Face visible: {face_pct}% of frames
+- Head facing camera (|yaw|<20° AND |pitch|<20°): {forward_pct}% of time
+- Head yaw mean ± std: {round(float(m.get('head_yaw_mean', 0)), 1)}° ± {round(float(m.get('head_yaw_std', 0)), 1)}°  [+ = turned right]
+- Head pitch mean ± std: {round(float(m.get('head_pitch_mean', 0)), 1)}° ± {round(float(m.get('head_pitch_std', 0)), 1)}°  [+ = tilted down]
+- Body movement mean: {round(float(m.get('body_movement_mean', 0)) * 100, 2)} (normalized ×100)"""
 
     return f"""You are an evidence-based communication coach analyzing a {lang_label} presentation.
 

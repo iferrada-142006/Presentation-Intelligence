@@ -4,12 +4,13 @@ from faster_whisper import WhisperModel
 from sqlalchemy.orm import Session
 from app.models import (
     Presentation, VideoFile, ProcessingJob,
-    TranscriptSegment, PresentationMetric, AudioFeature, FeedbackItem,
+    TranscriptSegment, PresentationMetric, AudioFeature, VideoFeature, FeedbackItem,
 )
 from app.services.extraction.ffmpeg import get_video_metadata, extract_audio
 from app.services.speech.transcriber import transcribe
 from app.services.speech.filler_words import detect_fillers, compute_filler_metrics
 from app.services.audio.analyzer import analyze as analyze_audio, compute_audio_metrics
+from app.services.vision.analyzer import analyze as analyze_vision, compute_vision_metrics
 from app.config import settings
 from app.services.feedback.llm import generate as generate_feedback
 
@@ -156,8 +157,49 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
             f"silence ratio={audio_result.silence_duration_seconds/audio_result.total_duration_seconds:.1%}"
         )
 
-        # ── Stage 4: LLM FEEDBACK ────────────────────────────────────────────
-        _set_stage(job, "feedback", 80, db)
+        # ── Stage 4: COMPUTER VISION ─────────────────────────────────────────
+        _set_stage(job, "vision", 73, db)
+
+        vision_result = analyze_vision(video_file.file_path)
+
+        if vision_result.total_frames_sampled > 0:
+            db.bulk_insert_mappings(VideoFeature, [
+                {
+                    "presentation_id": presentation.id,
+                    "timestamp_seconds": t,
+                    "frame_number": fn,
+                    "face_detected": fd,
+                    "head_yaw": yaw,
+                    "head_pitch": pitch,
+                    "head_roll": roll,
+                    "body_movement": bm,
+                }
+                for t, fn, fd, yaw, pitch, roll, bm in zip(
+                    vision_result.frame_timestamps,
+                    vision_result.frame_numbers,
+                    vision_result.frame_face_detected,
+                    vision_result.frame_head_yaw,
+                    vision_result.frame_head_pitch,
+                    vision_result.frame_head_roll,
+                    vision_result.frame_body_movement,
+                )
+            ])
+
+            for name, value, unit, conf in compute_vision_metrics(vision_result):
+                _save_metric(presentation.id, name, float(value), unit, conf, db)
+
+            face_ratio = sum(vision_result.frame_face_detected) / vision_result.total_frames_sampled
+            logger.info(
+                f"[job {job_id}] vision done — {vision_result.total_frames_sampled} frames, "
+                f"face={face_ratio:.0%}"
+            )
+        else:
+            logger.info(f"[job {job_id}] vision skipped (0 frames)")
+
+        _set_stage(job, "vision", 83, db)
+
+        # ── Stage 5: LLM FEEDBACK ────────────────────────────────────────────
+        _set_stage(job, "feedback", 85, db)
 
         # Rebuild metric dict from what was just written to DB
         metric_rows = db.query(PresentationMetric).filter(

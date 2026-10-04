@@ -27,6 +27,7 @@ export interface StatusResponse {
 }
 
 export interface Metrics {
+  // Speech / audio
   total_words: number | null
   avg_wpm: number | null
   filler_count: number | null
@@ -39,6 +40,15 @@ export interface Metrics {
   energy_cv: number | null
   wpm_std: number | null
   detected_language_prob: number | null
+  // Vision (Phase 5+)
+  face_visible_ratio: number | null
+  head_yaw_mean: number | null
+  head_yaw_std: number | null
+  head_pitch_mean: number | null
+  head_pitch_std: number | null
+  head_forward_ratio: number | null
+  body_movement_mean: number | null
+  body_movement_std: number | null
 }
 
 export interface TranscriptSegment {
