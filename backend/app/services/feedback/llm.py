@@ -135,11 +135,18 @@ def generate(presentation_data: dict, language: str = "es") -> list[dict]:
     prompt = _build_prompt(presentation_data, language)
 
     logger.info(f"Calling {LLM_MODEL} for feedback ({len(prompt)} chars prompt)")
-    message = client.messages.create(
-        model=LLM_MODEL,
-        max_tokens=MAX_TOKENS,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    try:
+        message = client.messages.create(
+            model=LLM_MODEL,
+            max_tokens=MAX_TOKENS,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.AuthenticationError:
+        logger.warning("ANTHROPIC_API_KEY is invalid — skipping LLM feedback")
+        return []
+    except anthropic.APIError as e:
+        logger.error(f"Anthropic API error: {e} — skipping LLM feedback")
+        return []
     raw = message.content[0].text.strip()
     logger.info(f"LLM response: {len(raw)} chars, "
                 f"input_tokens={message.usage.input_tokens}, "

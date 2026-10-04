@@ -51,6 +51,9 @@ class VisionAnalysisResult:
     frame_head_pitch: list[Optional[float]] = field(default_factory=list)
     frame_head_roll: list[Optional[float]] = field(default_factory=list)
     frame_body_movement: list[Optional[float]] = field(default_factory=list)
+    frame_gaze_offset: list[Optional[float]] = field(default_factory=list)   # iris horizontal offset [-1,1]
+    frame_hand_detected: list[int] = field(default_factory=list)
+    frame_hand_movement: list[Optional[float]] = field(default_factory=list)
     total_frames_sampled: int = 0
 
 
@@ -82,6 +85,44 @@ def _head_pose(
         pitch = math.atan2(-rmat[2, 0], sy)
         yaw   = 0.0
     return math.degrees(yaw), math.degrees(pitch), math.degrees(roll)
+
+
+# Iris landmark indices (only when refine_landmarks=True):
+# 468=right iris center, 473=left iris center
+# Eye corners for width estimation:
+_RIGHT_EYE_OUTER = 33   # right eye outer corner
+_RIGHT_EYE_INNER = 133  # right eye inner corner
+_LEFT_EYE_OUTER  = 263  # left eye outer corner
+_LEFT_EYE_INNER  = 362  # left eye inner corner
+
+
+def _gaze_offset(landmarks, n_landmarks: int) -> Optional[float]:
+    """Horizontal iris offset relative to eye width. Range ≈ [-1, 1], 0 = centred."""
+    if n_landmarks < 478:
+        return None
+    right_iris = landmarks[468]
+    left_iris  = landmarks[473]
+    r_outer = landmarks[_RIGHT_EYE_OUTER]
+    r_inner = landmarks[_RIGHT_EYE_INNER]
+    l_outer = landmarks[_LEFT_EYE_OUTER]
+    l_inner = landmarks[_LEFT_EYE_INNER]
+
+    r_center_x = (r_outer.x + r_inner.x) / 2
+    r_width    = abs(r_outer.x - r_inner.x)
+    l_center_x = (l_outer.x + l_inner.x) / 2
+    l_width    = abs(l_outer.x - l_inner.x)
+
+    if r_width < 1e-4 and l_width < 1e-4:
+        return None
+    r_off = (right_iris.x - r_center_x) / r_width if r_width > 1e-4 else 0.0
+    l_off = (left_iris.x  - l_center_x) / l_width  if l_width  > 1e-4 else 0.0
+    return float((r_off + l_off) / 2)
+
+
+def _hand_centroid(hand_lms) -> tuple[float, float]:
+    xs = [lm.x for lm in hand_lms]
+    ys = [lm.y for lm in hand_lms]
+    return (sum(xs) / len(xs), sum(ys) / len(ys))
 
 
 def _body_movement(cur_lms, prev_lms) -> Optional[float]:
@@ -120,16 +161,18 @@ def analyze(video_path: str, sample_fps: float = SAMPLE_FPS) -> VisionAnalysisRe
     )
 
     result = VisionAnalysisResult()
-    mp_face = mp.solutions.face_mesh
-    mp_pose = mp.solutions.pose
+    mp_face  = mp.solutions.face_mesh
+    mp_pose  = mp.solutions.pose
+    mp_hands = mp.solutions.hands
     prev_pose_lms = None
+    prev_hand_centroids: list[tuple[float, float]] = []
     frame_idx = 0
 
     with (
         mp_face.FaceMesh(
             static_image_mode=True,
             max_num_faces=1,
-            refine_landmarks=False,
+            refine_landmarks=True,          # enables 478 landmarks (iris)
             min_detection_confidence=0.5,
         ) as face_mesh,
         mp_pose.Pose(
@@ -137,6 +180,11 @@ def analyze(video_path: str, sample_fps: float = SAMPLE_FPS) -> VisionAnalysisRe
             model_complexity=0,
             min_detection_confidence=0.5,
         ) as pose,
+        mp_hands.Hands(
+            static_image_mode=True,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+        ) as hands,
     ):
         while True:
             ret, frame = cap.read()
@@ -148,14 +196,16 @@ def analyze(video_path: str, sample_fps: float = SAMPLE_FPS) -> VisionAnalysisRe
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 h, w = rgb.shape[:2]
 
-                # Face + head pose
+                # Face + head pose + iris gaze
                 face_res = face_mesh.process(rgb)
                 face_detected = 0
                 yaw = pitch = roll = None
+                gaze = None
                 if face_res.multi_face_landmarks:
                     face_detected = 1
                     lms = face_res.multi_face_landmarks[0].landmark
                     yaw, pitch, roll = _head_pose(lms, w, h)
+                    gaze = _gaze_offset(lms, len(lms))
 
                 # Body pose + movement
                 pose_res = pose.process(rgb)
@@ -168,15 +218,36 @@ def analyze(video_path: str, sample_fps: float = SAMPLE_FPS) -> VisionAnalysisRe
                 else:
                     prev_pose_lms = None
 
+                # Hands
+                hand_res = hands.process(rgb)
+                hand_detected = 0
+                hand_movement = None
+                if hand_res.multi_hand_landmarks:
+                    hand_detected = 1
+                    cur_centroids = [_hand_centroid(h_lms.landmark)
+                                     for h_lms in hand_res.multi_hand_landmarks]
+                    if prev_hand_centroids:
+                        dists = []
+                        for i, cc in enumerate(cur_centroids):
+                            if i < len(prev_hand_centroids):
+                                pc = prev_hand_centroids[i]
+                                dists.append(math.sqrt((cc[0]-pc[0])**2 + (cc[1]-pc[1])**2))
+                        if dists:
+                            hand_movement = float(np.mean(dists))
+                    prev_hand_centroids = cur_centroids
+                else:
+                    prev_hand_centroids = []
+
                 result.frame_timestamps.append(timestamp)
                 result.frame_numbers.append(frame_idx)
                 result.frame_face_detected.append(face_detected)
                 result.frame_head_yaw.append(round(yaw, 2) if yaw is not None else None)
                 result.frame_head_pitch.append(round(pitch, 2) if pitch is not None else None)
                 result.frame_head_roll.append(round(roll, 2) if roll is not None else None)
-                result.frame_body_movement.append(
-                    round(movement, 5) if movement is not None else None
-                )
+                result.frame_body_movement.append(round(movement, 5) if movement is not None else None)
+                result.frame_gaze_offset.append(round(gaze, 4) if gaze is not None else None)
+                result.frame_hand_detected.append(hand_detected)
+                result.frame_hand_movement.append(round(hand_movement, 5) if hand_movement is not None else None)
                 result.total_frames_sampled += 1
 
             frame_idx += 1
@@ -226,5 +297,23 @@ def compute_vision_metrics(result: VisionAnalysisResult) -> list[tuple]:
     if movements:
         metrics.append(("body_movement_mean", float(np.mean(movements)), "normalized", 0.8))
         metrics.append(("body_movement_std", float(np.std(movements)), "normalized", 0.8))
+
+    # Iris gaze offset (0=centred, ±1=extreme lateral)
+    gazes = [g for g in result.frame_gaze_offset if g is not None]
+    if gazes:
+        metrics.append(("gaze_offset_mean", float(np.mean(gazes)), "ratio", 0.75))
+        metrics.append(("gaze_offset_std", float(np.std(gazes)), "ratio", 0.75))
+        # fraction of frames where |gaze| < 0.15 (approx. centred)
+        centred = [abs(g) < 0.15 for g in gazes]
+        metrics.append(("gaze_centred_ratio", sum(centred) / len(centred), "ratio", 0.75))
+
+    # Hand presence and movement
+    if result.frame_hand_detected:
+        hand_ratio = sum(result.frame_hand_detected) / n
+        metrics.append(("hand_visible_ratio", hand_ratio, "ratio", 0.8))
+    hand_moves = [m for m in result.frame_hand_movement if m is not None]
+    if hand_moves:
+        metrics.append(("hand_movement_mean", float(np.mean(hand_moves)), "normalized", 0.8))
+        metrics.append(("hand_movement_std", float(np.std(hand_moves)), "normalized", 0.8))
 
     return metrics

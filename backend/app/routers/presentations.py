@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from sqlalchemy.orm import joinedload
 from app.models import Presentation, VideoFile, ProcessingJob, TranscriptSegment, PresentationMetric, AudioFeature, VideoFeature, RubricScore, TimelineEvent, FeedbackItem
-from app.schemas.presentation import PresentationCreate, PresentationStatus
+from app.schemas.presentation import PresentationCreate, PresentationStatus, PresentationListItem
 from app.schemas.report import ReportOut, MetricsOut, RubricScoreOut, TranscriptSegmentOut, TimelineEventOut, FeedbackItemOut
 from app.config import settings
 
@@ -103,9 +103,28 @@ def get_status(presentation_id: int, db: Session = Depends(get_db)):
     return presentation
 
 
-@router.get("/", response_model=list[PresentationStatus])
+@router.get("/", response_model=list[PresentationListItem])
 def list_presentations(db: Session = Depends(get_db)):
-    return db.query(Presentation).order_by(Presentation.uploaded_at.desc()).all()
+    presentations = db.query(Presentation).order_by(Presentation.uploaded_at.desc()).all()
+    result = []
+    for p in presentations:
+        rubric = db.query(RubricScore).filter(RubricScore.presentation_id == p.id).all()
+        avg_score = round(sum(r.score for r in rubric) / len(rubric), 1) if rubric else None
+        metrics = {m.metric_name: m.value for m in
+                   db.query(PresentationMetric).filter(PresentationMetric.presentation_id == p.id).all()}
+        result.append(PresentationListItem(
+            id=p.id,
+            title=p.title,
+            status=p.status,
+            language=p.language,
+            duration_seconds=p.duration_seconds,
+            uploaded_at=p.uploaded_at,
+            processed_at=p.processed_at,
+            avg_score=avg_score,
+            avg_wpm=metrics.get("avg_wpm"),
+            filler_count=metrics.get("filler_count"),
+        ))
+    return result
 
 
 @router.get("/{presentation_id}/report", response_model=ReportOut)

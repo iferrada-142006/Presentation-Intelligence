@@ -9,7 +9,7 @@ from app.models import (
 )
 from app.services.extraction.ffmpeg import get_video_metadata, extract_audio
 from app.services.speech.transcriber import transcribe
-from app.services.speech.filler_words import detect_fillers, compute_filler_metrics
+from app.services.speech.filler_words import detect_fillers, detect_self_corrections, compute_filler_metrics
 from app.services.audio.analyzer import analyze as analyze_audio, compute_audio_metrics
 from app.services.vision.analyzer import analyze as analyze_vision, compute_vision_metrics
 from app.config import settings
@@ -64,6 +64,13 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
         presentation.status = "processing"
         db.commit()
 
+        # Purge any data from previous failed runs to keep pipeline idempotent
+        pid = presentation.id
+        for model in (FeedbackItem, RubricScore, TimelineEvent, VideoFeature,
+                      AudioFeature, PresentationMetric, TranscriptSegment):
+            db.query(model).filter(model.presentation_id == pid).delete()
+        db.commit()
+
         # ── Stage 1: EXTRACT ─────────────────────────────────────────────────
         _set_stage(job, "extract", 5, db)
         metadata = get_video_metadata(video_file.file_path)
@@ -101,6 +108,7 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
         _set_stage(job, "speech", 45, db)
 
         filler_occurrences = detect_fillers(speech_result["segments"], speech_result["language"])
+        self_corrections = detect_self_corrections(speech_result["segments"], speech_result["language"])
         filler_metrics = compute_filler_metrics(
             filler_occurrences,
             total_words,
@@ -111,17 +119,46 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
         avg_wpm = round((total_words / duration) * 60, 1) if duration > 0 else 0.0
 
         for name, value, unit, conf in [
-            ("total_words",          total_words,                              "words",      1.0),
-            ("avg_wpm",              avg_wpm,                                  "wpm",        0.9),
-            ("filler_count",         filler_metrics["filler_count"],           "count",      0.7),
-            ("filler_rate_per_min",  filler_metrics["filler_rate_per_minute"], "count/min",  0.7),
-            ("detected_language_prob", speech_result["language_probability"],  "probability",1.0),
+            ("total_words",            total_words,                                "words",      1.0),
+            ("avg_wpm",                avg_wpm,                                    "wpm",        0.9),
+            ("filler_count",           filler_metrics["filler_count"],             "count",      0.7),
+            ("filler_rate_per_min",    filler_metrics["filler_rate_per_minute"],   "count/min",  0.7),
+            ("self_correction_count",  float(len(self_corrections)),               "count",      0.7),
+            ("detected_language_prob", speech_result["language_probability"],      "probability",1.0),
         ]:
             _save_metric(presentation.id, name, float(value), unit, conf, db)
 
+        # Store individual filler occurrences as timeline events for UI linking
+        for occ in filler_occurrences:
+            db.add(TimelineEvent(
+                presentation_id=presentation.id,
+                layer="speech",
+                event_type="filler_word",
+                start_seconds=float(occ.start_seconds),
+                end_seconds=float(occ.end_seconds),
+                duration_seconds=float(occ.end_seconds - occ.start_seconds),
+                magnitude=None,
+                description=f'"{occ.word}"',
+            ))
+
+        # Store self-corrections as timeline events
+        for sc in self_corrections:
+            db.add(TimelineEvent(
+                presentation_id=presentation.id,
+                layer="speech",
+                event_type="self_correction",
+                start_seconds=float(sc.start_seconds),
+                end_seconds=float(sc.end_seconds),
+                duration_seconds=float(sc.end_seconds - sc.start_seconds),
+                magnitude=None,
+                description=f'Auto-corrección: "{sc.phrase}"',
+            ))
+
+        db.commit()
+
         _set_stage(job, "speech", 55, db)
         logger.info(f"[job {job_id}] speech done — {total_words} words, {avg_wpm} WPM, "
-                    f"{filler_metrics['filler_count']} fillers")
+                    f"{filler_metrics['filler_count']} fillers, {len(self_corrections)} self-corrections")
 
         # ── Stage 3: AUDIO ANALYSIS ──────────────────────────────────────────
         _set_stage(job, "audio", 58, db)
@@ -217,6 +254,17 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
 
         _set_stage(job, "features", 87, db)
 
+        # Build metric dict and transcript from DB — shared by rubric + feedback stages
+        metric_rows = db.query(PresentationMetric).filter(
+            PresentationMetric.presentation_id == presentation.id
+        ).all()
+        metrics_for_llm = {m.metric_name: m.value for m in metric_rows}
+
+        transcript_rows = db.query(TranscriptSegment).filter(
+            TranscriptSegment.presentation_id == presentation.id
+        ).order_by(TranscriptSegment.start_seconds).all()
+        transcript_text = " ".join(r.text.strip() for r in transcript_rows)[:4000]
+
         # ── Stage 7: RUBRIC ENGINE ───────────────────────────────────────────
         _set_stage(job, "rubric", 88, db)
 
@@ -233,18 +281,6 @@ def run(job_id: int, db: Session, whisper_model: WhisperModel):
 
         # ── Stage 8: LLM FEEDBACK ────────────────────────────────────────────
         _set_stage(job, "feedback", 92, db)
-
-        # Rebuild metric dict from what was just written to DB
-        metric_rows = db.query(PresentationMetric).filter(
-            PresentationMetric.presentation_id == presentation.id
-        ).all()
-        metrics_for_llm = {m.metric_name: m.value for m in metric_rows}
-
-        # Build transcript text (first 4000 chars to stay within token budget)
-        transcript_rows = db.query(TranscriptSegment).filter(
-            TranscriptSegment.presentation_id == presentation.id
-        ).order_by(TranscriptSegment.start_seconds).all()
-        transcript_text = " ".join(r.text.strip() for r in transcript_rows)[:4000]
 
         presentation_data = {
             "presentation": {

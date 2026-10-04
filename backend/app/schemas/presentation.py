@@ -35,3 +35,16 @@ class PresentationCreate(BaseModel):
     job_id: int
 
     model_config = {"from_attributes": True}
+
+
+class PresentationListItem(BaseModel):
+    id: int
+    title: str
+    status: str
+    language: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    uploaded_at: datetime
+    processed_at: Optional[datetime] = None
+    avg_score: Optional[float] = None
+    avg_wpm: Optional[float] = None
+    filler_count: Optional[float] = None

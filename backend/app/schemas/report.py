@@ -35,6 +35,14 @@ class MetricsOut(BaseModel):
     head_forward_ratio: Optional[float] = None
     body_movement_mean: Optional[float] = None
     body_movement_std: Optional[float] = None
+    # Iris gaze
+    gaze_offset_mean: Optional[float] = None
+    gaze_offset_std: Optional[float] = None
+    gaze_centred_ratio: Optional[float] = None
+    # Hands
+    hand_visible_ratio: Optional[float] = None
+    hand_movement_mean: Optional[float] = None
+    hand_movement_std: Optional[float] = None
 
 
 class RubricScoreOut(BaseModel):

@@ -39,6 +39,7 @@ export interface Metrics {
   silence_ratio: number | null
   energy_cv: number | null
   wpm_std: number | null
+  self_correction_count: number | null
   detected_language_prob: number | null
   // Vision (Phase 5+)
   face_visible_ratio: number | null
@@ -158,5 +159,24 @@ export async function getReport(id: number): Promise<Report> {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail ?? 'Report fetch failed')
   }
+  return res.json()
+}
+
+export interface PresentationListItem {
+  id: number
+  title: string
+  status: string
+  language: string | null
+  duration_seconds: number | null
+  uploaded_at: string
+  processed_at: string | null
+  avg_score: number | null
+  avg_wpm: number | null
+  filler_count: number | null
+}
+
+export async function listPresentations(): Promise<PresentationListItem[]> {
+  const res = await fetch(`${BASE}/presentations/`)
+  if (!res.ok) throw new Error('List fetch failed')
   return res.json()
 }
